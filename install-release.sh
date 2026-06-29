@@ -10,7 +10,7 @@
 #   bash install-release.sh                  # latest release, install
 #   bash install-release.sh v0.2.0           # a specific release tag
 #   bash install-release.sh latest --force   # re-wire over an existing install
-#   curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install-release.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/devmaxde/caveman-rs/refs/heads/main/install-release.sh | bash
 #
 # Env:
 #   CAVEMAN_REPO   override the GitHub repo (default JuliusBrussee/caveman)
