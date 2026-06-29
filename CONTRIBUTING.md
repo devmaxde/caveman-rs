@@ -5,8 +5,8 @@ makes 30+ AI coding agents talk in compressed caveman-style prose. Most
 contributions fall into one of three buckets:
 
 1. **Editing skill prose** — change how caveman speaks, what intensity levels do, what slash commands trigger.
-2. **Adding a new agent** — wire a fresh editor/CLI/IDE into the unified installer.
-3. **Fixing the hooks or installer** — Claude Code hooks, the Node installer, the per-repo init script.
+2. **Adding a new agent** — add a per-repo rule target in `rust/src/init.rs` or a row to the install tables.
+3. **Fixing the hooks or installer** — the native Rust binary in `rust/` (hooks, installer, stats, statusline). Needs the Rust toolchain ([rustup.rs](https://rustup.rs)); no Node.
 
 Caveman like simple. Small focused PR > big rewrite.
 
@@ -18,8 +18,9 @@ The repo distributes one skill (caveman) plus a handful of sub-skills
 (caveman-commit, caveman-review, caveman-compress, cavecrew-*) to many
 agents through different distribution mechanisms (Claude Code plugin, Codex
 plugin, Gemini extension, Cursor/Windsurf/Cline rule files, `npx skills` for
-the long tail). A single Node installer at `bin/install.js` detects which
-agents are on the user's machine and installs the right thing for each.
+the long tail). The Claude Code path is a **native Rust binary** (`rust/`) —
+no Node. Other agents are reached through the external `npx skills` CLI and
+the per-repo rule writer `caveman init`.
 
 Sources of truth live at the **top level** of the repo. Agent-specific
 copies live under `plugins/caveman/` and similar mirror dirs — those are
@@ -38,12 +39,12 @@ copies live under `plugins/caveman/` and similar mirror dirs — those are
 | Caveman quick-reference card | `skills/caveman-help/SKILL.md` |
 | Cavecrew decision guide (when to delegate to subagents) | `skills/cavecrew/SKILL.md` |
 | cavecrew subagent definitions | `agents/cavecrew-investigator.md`, `agents/cavecrew-builder.md`, `agents/cavecrew-reviewer.md` |
-| Auto-activation rule body (Cursor/Windsurf/Cline/Copilot) | `src/rules/caveman-activate.md` |
-| Add support for a new agent | `bin/install.js` (PROVIDERS array) |
-| Per-repo init script (drops rule files into a user's repo) | `src/tools/caveman-init.js` |
-| Claude Code hooks | `src/hooks/caveman-activate.js`, `src/hooks/caveman-mode-tracker.js`, `src/hooks/caveman-config.js`, `src/hooks/caveman-statusline.sh`, `src/hooks/caveman-statusline.ps1` |
-| Settings.json read/write helpers | `bin/lib/settings.js` |
-| MCP shrink server | `src/mcp-servers/caveman-shrink/` |
+| Auto-activation rule body (Cursor/Windsurf/Cline/Copilot) | `src/rules/caveman-activate.md` (embedded into the Rust binary at build) |
+| Add a per-agent rule target for `caveman init` | `rust/src/init.rs` (`agents()` list) |
+| Per-repo init logic (drops rule files into a user's repo) | `rust/src/init.rs` |
+| Claude Code hooks (activate, mode-tracker, stats, statusline) | `rust/src/{activate,mode_tracker,stats,statusline}.rs` |
+| Mode resolution + symlink-safe flag I/O | `rust/src/config.rs` |
+| Settings.json read/write helpers + installer | `rust/src/settings.rs`, `rust/src/install.rs` |
 
 That's it. Every other markdown file with `SKILL.md` in the path is a copy.
 
@@ -72,28 +73,20 @@ dotdir mirror, it's a build artifact. Edit the top-level source instead.
 
 ## Adding a new agent
 
-The unified Node installer at `bin/install.js` is the **single source of
-truth** for the supported-agent list. The README and `INSTALL.md` install
-tables mirror it by hand — bash and PowerShell shims at the repo root just
-delegate to it.
+There's no unified installer anymore — the Claude Code path is the Rust binary,
+and other agents install through the external `npx skills` CLI. To add an agent:
 
 1. Confirm the agent has a distribution path. Either:
    - it has a profile slug in upstream [vercel-labs/skills](https://github.com/vercel-labs/skills) (most common), or
    - it has a native plugin / extension / rule-file mechanism we can target.
-2. Append a row to the `PROVIDERS` array in `bin/install.js`. Each row needs:
-   - `id` — short kebab-case identifier (e.g. `windsurf`)
-   - `label` — human display name (e.g. `Windsurf`)
-   - `mech` — distribution mechanism (`plugin`, `extension`, `rules-file`, `skills-cli`, …)
-   - `detect` — clause spec like `command:foo||dir:$HOME/x` describing how to detect the agent
-   - `profile` — the vercel-labs/skills slug, if applicable
-   - `soft: true` — set when detection is config-dir-only (best-effort)
-3. Run `node bin/install.js --list` and confirm the new row renders correctly. Soft probes should show as `(soft)`.
-4. Add a row to the install tables in `README.md` and `INSTALL.md`.
-5. No CI changes needed — the workflow re-reads `bin/install.js` automatically.
+2. If it reads a per-repo rule file, add an `Agent` entry to the `agents()` list
+   in `rust/src/init.rs` (`id`, `file`, `frontmatter`, `Mode::Replace`/`Append`),
+   then `cargo test` / `cargo build`.
+3. Add a row to the install tables in `README.md` and `INSTALL.md` with the
+   correct `npx skills add ... -a <profile>` slug (or `caveman init --only <id>`).
 
-Bad slug? `npx skills add` fails at install **runtime**, not at install-script
-load. Always verify the slug against the vercel-labs/skills README before
-merging.
+Bad slug? `npx skills add` fails at install **runtime**, not before. Always
+verify the slug against the vercel-labs/skills README before merging.
 
 ---
 
@@ -117,20 +110,14 @@ merging.
 ## Running tests
 
 ```bash
-# Installer unit + e2e tests (Node)
-npm test
+# Rust unit tests (settings JSONC, hook merge, stats math, flag I/O)
+cargo test --manifest-path rust/Cargo.toml
 
 # Compress-skill safety tests (Python)
 python3 -m unittest tests.test_compress_safety
-
-# Per-repo init tests
-node tests/test_caveman_init.js
-
-# Flag-file symlink-safety tests
-node tests/test_symlink_flag.js
 ```
 
-CI runs all of the above on every PR. If any test depends on a network or
+If any test depends on a network or
 external SDK, it must skip cleanly when the dependency is missing — never
 gate the whole suite on optional creds.
 
@@ -161,7 +148,7 @@ real runs — never invent or round.
 
 - **Conventional Commits** for the commit subject. See `skills/caveman-commit/SKILL.md` for the format we use here.
 - **One concern per PR.** A README copy-edit and an installer fix go in separate PRs.
-- **Update `package.json` `files`** if you add a new top-level directory the installer needs to ship to npm. Files outside that array don't get published.
+- **Rebuild after Rust changes.** `cargo build --release --manifest-path rust/Cargo.toml` and `cargo test` must pass.
 - **Show before/after** for prose changes to any `SKILL.md`. One sentence on why the new wording is better.
 - **Mention the CI sync.** If you edited a source-of-truth file, note it: "CI will resync `plugins/caveman/skills/...` on merge."
 
@@ -173,19 +160,18 @@ PR descriptions don't need to be long. Caveman style fine. Just say what change,
 
 A handful of invariants that have bitten us before. Keep them.
 
-- **Hooks must silent-fail on filesystem errors.** A `try/catch` that swallows the error is correct here. A hook that throws blocks Claude Code session start — that's user-facing breakage. See existing patterns in `src/hooks/caveman-activate.js`.
-- **Settings.json reads and writes go through `bin/lib/settings.js`.** It tolerates JSONC comments. Direct `JSON.parse` on a user's `settings.json` will crash on a single `// comment`.
-- **Validate hook entries before writing.** Use `validateHookFields()` in `bin/lib/settings.js`. Claude Code's Zod schema silently discards the **entire** `settings.json` on a single bad hook entry — one malformed write poisons the user's whole config.
-- **Symlink-safe flag writes via `safeWriteFlag()`** in `src/hooks/caveman-config.js`. The flag file lives at a predictable path under `$CLAUDE_CONFIG_DIR/`; without `O_NOFOLLOW` and a parent-symlink check, a local attacker can clobber any file the user can write.
-- **Honor `CLAUDE_CONFIG_DIR`.** Hooks, the installer, and the statusline scripts must respect it — never hardcode `~/.claude`.
-- **`install.sh` and `install.ps1` at the repo root are 30-line shims** that delegate to `bin/install.js`. Don't re-add per-OS install logic to them. Quoting bugs that way lie.
+- **Hook subcommands must silent-fail on filesystem errors.** A hook that panics blocks Claude Code session start — that's user-facing breakage. See the `let _ = (|| -> Option<()> {...})()` patterns in `rust/src/config.rs` and the silent stdin handling in `rust/src/mode_tracker.rs`.
+- **Settings.json reads/writes go through `rust/src/settings.rs`.** `read_settings` tolerates JSONC comments + trailing commas. It backs up to `settings.json.bak` before any write.
+- **Symlink-safe flag writes via `safe_write_flag()`** in `rust/src/config.rs`. The flag lives at a predictable path under `$CLAUDE_CONFIG_DIR/`; without `O_NOFOLLOW` and a parent-symlink + uid check, a local attacker can clobber any file the user can write.
+- **Honor `CLAUDE_CONFIG_DIR`.** Use `config::claude_dir()` — never hardcode `~/.claude`.
+- **`install.sh` / `install.ps1` only build with cargo and call `caveman install`.** Don't shell out to another runtime to edit `settings.json`; that logic lives in `rust/src/settings.rs`.
 
 ---
 
 ## Ideas
 
 See [issues labeled `good first issue`](../../issues?q=label%3A%22good+first+issue%22)
-for starter tasks. Or grep `TODO` / `FIXME` in `src/hooks/`, `bin/`, `src/tools/` —
+for starter tasks. Or grep `TODO` / `FIXME` in `rust/src/` —
 each one is a real lead.
 
 Caveman like contribution. You bring rock, caveman put rock in pile. Pile

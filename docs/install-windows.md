@@ -1,6 +1,6 @@
 # Windows install fallback
 
-If `irm https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.ps1 | iex` fails on Windows (issues #249, #199, #72), set up plugin-skill activation by hand. This does **not** install the standalone hooks or the statusline — for those, run the unified Node installer afterwards: `npx -y github:JuliusBrussee/caveman -- --only claude` (or `node bin/install.js --only claude` from a clone).
+The supported Windows path is `pwsh install.ps1` from a clone — it builds the native Rust binary (`cargo build --release`) and wires the hooks + statusline. It needs the Rust toolchain ([rustup.rs](https://rustup.rs)); no Node. If that fails, set up plugin-skill activation by hand below. This manual path does **not** install the hooks or the statusline — for those, run `pwsh install.ps1` once cargo is available.
 
 ```powershell
 $ClaudeDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME ".claude" }

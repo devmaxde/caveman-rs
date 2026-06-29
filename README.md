@@ -98,21 +98,25 @@ npm install -g @juliusbrussee/caveman-code
 
 ## Install
 
-One line. Find every agent. Install for each.
+Caveman now native. Pure Rust. **No Node.** Brain still big, footprint small.
 
 ```bash
-# macOS / Linux / WSL / Git Bash
-curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh | bash
+# 1. Get caveman
+git clone https://github.com/JuliusBrussee/caveman
+cd caveman
 
-# Windows (PowerShell 5.1+)
-irm https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.ps1 | iex
+# 2. Build + wire into Claude Code
+bash install.sh          # macOS / Linux / WSL
+pwsh install.ps1         # Windows
 ```
 
-~30 seconds. Needs Node ≥18. Skip agent you no have. Safe to re-run.
+Needs Rust once — grab from [rustup.rs](https://rustup.rs). Safe to re-run (`--force` to rebuild). Remove with `bash install.sh --uninstall`.
+
+One binary do everything: SessionStart hook, prompt hook, statusline, stats, installer. No `node` ever run. One rock. That it.
 
 **Trigger:** type `/caveman` or say "talk like caveman". Stop with "normal mode".
 
-One agent only, manual command, or any of 30+ other agents → [**INSTALL.md**](./INSTALL.md).
+Other agents (Cursor, Windsurf, Cline, Copilot, 30+ more) → [**INSTALL.md**](./INSTALL.md).
 Install break? Open agent, say *"Read CLAUDE.md and INSTALL.md, install caveman for me."* Agent fix own brain.
 
 ## What You Get
@@ -124,12 +128,11 @@ Install break? Open agent, say *"Read CLAUDE.md and INSTALL.md, install caveman 
 | `/caveman-review` | One-line PR comments: `L42: 🔴 bug: user null. Add guard.` |
 | `/caveman-stats` | Real session token usage + lifetime savings + USD. Tweetable line via `--share`. |
 | `/caveman-compress <file>` | Rewrite memory file (e.g. `CLAUDE.md`) into caveman-speak. Cuts ~46% input tokens every session. Code/URLs/paths byte-preserved. |
-| `caveman-shrink` | MCP middleware. Wraps any MCP server, compresses tool descriptions. [npm](https://www.npmjs.com/package/caveman-shrink). |
 | `cavecrew-*` | Caveman subagents (investigator/builder/reviewer). ~60% fewer tokens than vanilla, main context lasts longer. |
 
 **Statusline badge** — Claude Code shows `[CAVEMAN] ⛏ 12.4k` (lifetime tokens saved). Updates every `/caveman-stats` run. Set `CAVEMAN_STATUSLINE_SAVINGS=0` to silence.
 
-Auto-activate every session: Claude Code, Codex, Gemini (built-in). Cursor / Windsurf / Cline / Copilot get always-on rule files via `--with-init`. Other agents trigger with `/caveman` per session. Full feature matrix in [INSTALL.md](./INSTALL.md#what-you-get).
+Auto-activate every session: Claude Code, Codex, Gemini (built-in). Cursor / Windsurf / Cline / Copilot get always-on rule files via `caveman init`. Other agents trigger with `/caveman` per session. Full feature matrix in [INSTALL.md](./INSTALL.md#what-you-get).
 
 ## Benchmarks
 
@@ -183,15 +186,7 @@ Maintainer detail (hook architecture, file ownership, CI sync) live in [CLAUDE.m
 
 [**OpenClaw**](https://openclaw.ai) the self-host gateway. One box, many agent inside (Claude Code, Codex, Pi, OpenCode), wired to your Slack / Discord / iMessage / Telegram / whatever. Tagline: *"The lobster way."* Lobster strong. Lobster smart. Lobster also talk a lot.
 
-Caveman teach lobster brevity — same canonical installer, scoped to one agent:
-
-```bash
-# macOS / Linux / WSL
-curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh | bash -s -- --only openclaw
-
-# Windows (PowerShell): no Node? install Node ≥18 first, then
-npx -y github:JuliusBrussee/caveman -- --only openclaw
-```
+Caveman teach lobster brevity. The native Rust installer focuses on Claude Code; OpenClaw setup is two manual drops into your workspace:
 
 Two thing happen, no more:
 

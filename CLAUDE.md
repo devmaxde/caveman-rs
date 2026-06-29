@@ -35,11 +35,20 @@ caveman/
 ├── CLAUDE.md                    # This file (maintainer instructions)
 ├── AGENTS.md / GEMINI.md        # Autodiscovery files (must stay at root)
 │
-├── install.sh / install.ps1     # 30-line shims → bin/install.js
+├── install.sh / install.ps1     # cargo build --release → `caveman install` (no Node)
 │
-├── bin/                         # Unified installer
-│   ├── install.js               # Single source for all 30+ agents (PROVIDERS array)
-│   └── lib/settings.js          # JSONC-tolerant settings.json reader/writer
+├── rust/                        # Native Rust binary — the WHOLE Claude Code runtime
+│   ├── Cargo.toml
+│   └── src/                     # one binary, subcommands replace the old Node hooks:
+│       ├── main.rs              #   dispatch
+│       ├── config.rs           #   mode resolution + symlink-safe flag I/O (was caveman-config.js)
+│       ├── activate.rs         #   SessionStart hook (was caveman-activate.js)
+│       ├── mode_tracker.rs     #   UserPromptSubmit hook (was caveman-mode-tracker.js)
+│       ├── stats.rs            #   /caveman-stats (was caveman-stats.js)
+│       ├── statusline.rs       #   badge (was caveman-statusline.sh/.ps1)
+│       ├── init.rs             #   per-repo rules (was src/tools/caveman-init.js)
+│       ├── install.rs          #   install/uninstall + settings.json edit (was install.sh's node -e)
+│       └── settings.rs         #   JSONC-tolerant settings.json reader/writer
 │
 ├── skills/                      # ALL skills, single source of truth
 │   ├── caveman/{SKILL.md, README.md}
@@ -54,10 +63,7 @@ caveman/
 ├── commands/                    # Codex/Gemini TOML command stubs (root for plugin auto-discovery)
 │
 ├── src/                         # Internal source — not auto-discovered by plugin
-│   ├── hooks/                   # Claude Code hooks (installer reads here)
-│   ├── rules/                   # Auto-activation rule body (single source)
-│   ├── tools/                   # caveman-init.js (per-repo rule writer)
-│   └── mcp-servers/             # caveman-shrink npm-published MCP middleware
+│   └── rules/                   # Auto-activation rule bodies (single source; embedded into the Rust binary)
 │
 ├── .claude-plugin/              # Claude Code plugin manifest (REQUIRED at root)
 ├── plugins/caveman/             # Claude Code plugin distribution (CI-mirrored)
@@ -67,7 +73,7 @@ caveman/
 ├── dist/                        # Build artifacts (gitignored)
 │   └── caveman.skill            # ZIP of skills/caveman/, rebuilt by CI
 │
-├── tests/                       # All tests (Node + Python)
+├── tests/                       # Python compress-skill tests (Rust tests live in rust/ via `cargo test`)
 ├── benchmarks/                  # Real token measurements through Claude API
 ├── evals/                       # Three-arm eval harness
 ├── docs/                        # User-facing docs site
@@ -82,10 +88,9 @@ caveman/
 
 | File | What it controls |
 |------|-----------------|
-| `skills/caveman/SKILL.md` | Caveman behavior: intensity levels, rules, wenyan mode, auto-clarity, persistence. Only file to edit for behavior changes. |
-| `src/rules/caveman-activate.md` | Always-on auto-activation rule body. Consumed by `src/tools/caveman-init.js` when a user runs `npx caveman --with-init` (per-repo IDE rule files). Edit here, not in any per-agent rule copy. |
-| `src/rules/caveman-openclaw-bootstrap.md` | Marker-fenced bootstrap snippet appended to `~/.openclaw/workspace/SOUL.md` by `bin/lib/openclaw.js`. Drives always-on caveman through the OpenClaw gateway. Must include the SENTINEL `Respond terse like smart caveman` and stay well under OpenClaw's 12K-per-bootstrap-file cap. |
-| `bin/lib/openclaw.js` | OpenClaw install/uninstall helper. Frontmatter merge (`version`, `always: true`), SOUL.md marker append/strip, idempotent. Shared by `bin/install.js` and `src/tools/caveman-init.js`. |
+| `skills/caveman/SKILL.md` | Caveman behavior: intensity levels, rules, wenyan mode, auto-clarity, persistence. Only file to edit for behavior changes. `rust/src/activate.rs` reads this at runtime to emit the ruleset (filtered to the active level). |
+| `src/rules/caveman-activate.md` | Always-on auto-activation rule body. **Embedded into the Rust binary at build time** via `include_str!` in `rust/src/init.rs` (powers `caveman init`). Edit here; rebuild to propagate. |
+| `src/rules/caveman-openclaw-bootstrap.md` | Marker-fenced OpenClaw SOUL.md bootstrap snippet. Currently **not wired into the Rust binary** — OpenClaw native install was a Node helper (`bin/lib/openclaw.js`) that was removed in the Rust port. Kept as the source of truth if OpenClaw support is re-added. Must keep the SENTINEL `Respond terse like smart caveman`. |
 | `skills/caveman-commit/SKILL.md` | Caveman commit message behavior. Fully independent skill. |
 | `skills/caveman-review/SKILL.md` | Caveman code review behavior. Fully independent skill. |
 | `skills/caveman-help/SKILL.md` | Quick-reference card. One-shot display, not a persistent mode. |
@@ -94,12 +99,12 @@ caveman/
 | `agents/cavecrew-investigator.md` | Read-only locator subagent (haiku). Output contract: `path:line — symbol — note`. |
 | `agents/cavecrew-builder.md` | Surgical 1-2 file editor subagent. Refuses 3+ file scope. |
 | `agents/cavecrew-reviewer.md` | Diff/file reviewer subagent (haiku). One-line findings with severity emoji. |
-| `src/plugins/opencode/plugin.js` | opencode native plugin. ESM Bun module — `session.created` writes flag, `tui.prompt.append` parses slash/natural-language activation and appends per-prompt reinforcement. Reuses `caveman-config.js` via `createRequire`. |
-| `src/plugins/opencode/commands/*.md` | Six opencode slash-command prompt templates (`/caveman`, `/caveman-{commit,review,compress,stats,help}`). |
+| `rust/src/config.rs` | Mode resolution + symlink-safe flag read/write/append. Port of the old `caveman-config.js`. Every flag-file write goes through `safe_write_flag` here. |
+| `rust/src/settings.rs` | JSONC-tolerant `settings.json` reader/writer + caveman hook add/remove. Used by `caveman install`/`uninstall`. |
 
 ### Auto-generated / auto-synced — do not edit directly
 
-We removed the agent-specific dotdir mirrors at the repo root (`.cursor/`, `.windsurf/`, `.clinerules/`, `.github/copilot-instructions.md`, root `caveman/SKILL.md`). They were never read by the installer — only used to self-apply caveman to this repo when a maintainer opened it in Cursor/Windsurf/Cline. Devs who want caveman in their editor while editing this repo should run `npx caveman --with-init` once (writes per-repo rule files from `src/rules/caveman-activate.md` via `src/tools/caveman-init.js`). For per-user installs through the upstream skills CLI, `npx caveman --only <agent>` runs `npx skills add ... -a <profile>`.
+We removed the agent-specific dotdir mirrors at the repo root (`.cursor/`, `.windsurf/`, `.clinerules/`, `.github/copilot-instructions.md`, root `caveman/SKILL.md`). They were never read by the installer — only used to self-apply caveman to this repo when a maintainer opened it in Cursor/Windsurf/Cline. Devs who want caveman in their editor while editing this repo should run `caveman init` once (writes per-repo rule files; the rule body is embedded from `src/rules/caveman-activate.md` at build time). For per-user installs through the upstream skills CLI, run `npx skills add JuliusBrussee/caveman -a <profile>`.
 
 A handful of dotdir leftovers (`.junie/`, `.kiro/`, `.roo/`, `.agents/`) still hold a stale `cavecrew/SKILL.md` mirror from before the cleanup. They aren't read by anything in the current install path; remove on sight, no migration needed.
 
@@ -134,77 +139,64 @@ The old steps that mirrored SKILL.md and rules into root dotdirs (`.cursor/`, `.
 
 ---
 
-## Hook system (Claude Code)
+## Hook system (Claude Code) — native Rust
 
-Three hooks in `src/hooks/` plus a `caveman-config.js` shared module and a `package.json` CommonJS marker. Communicate via flag file at `$CLAUDE_CONFIG_DIR/.caveman-active` (falls back to `~/.claude/.caveman-active`).
+**No Node.** One Rust binary, `caveman`, is the entire Claude Code runtime. Each
+hook is a subcommand of the same binary (built from `rust/`). Hooks communicate
+via the flag file at `$CLAUDE_CONFIG_DIR/.caveman-active` (falls back to
+`~/.claude/.caveman-active`). All subcommands honor `CLAUDE_CONFIG_DIR`.
 
 ```
-SessionStart hook ──writes "full"──▶ $CLAUDE_CONFIG_DIR/.caveman-active ◀──writes mode── UserPromptSubmit hook
-                                                       │
-                                                    reads
-                                                       ▼
-                                              caveman-statusline.sh
-                                            [CAVEMAN] / [CAVEMAN:ULTRA] / ...
+caveman activate ──writes "full"──▶ $CLAUDE_CONFIG_DIR/.caveman-active ◀──writes mode── caveman mode-tracker
+   (SessionStart)                                    │                                    (UserPromptSubmit)
+                                                   reads
+                                                     ▼
+                                            caveman statusline
+                                          [CAVEMAN] / [CAVEMAN:ULTRA] / ...
 ```
 
-`src/hooks/package.json` pins the directory to `{"type": "commonjs"}` so the `.js` hooks resolve as CJS even when an ancestor `package.json` (e.g. `~/.claude/package.json` from another plugin) declares `"type": "module"`. Without this, `require()` blows up with `ReferenceError: require is not defined in ES module scope`.
+### `rust/src/config.rs` — shared module
 
-All hooks honor `CLAUDE_CONFIG_DIR` for non-default Claude Code config locations.
+- `get_default_mode()` — resolves the default mode in order: `CAVEMAN_DEFAULT_MODE` env var → repo-local config (`<cwd>/.caveman/config.json` or `<cwd>/.caveman.json`, walking up to the filesystem root) → user config (`$XDG_CONFIG_HOME/caveman/config.json` / `~/.config/caveman/config.json` / `%APPDATA%\caveman\config.json`) → `"full"`. The env var short-circuits before any cwd walk.
+- `find_repo_config_path(start)` — walks up looking for the first `.caveman/config.json` or `.caveman.json`. Bounded to 64 ancestors. Refuses symlinked files.
+- `safe_write_flag(path, content)` — symlink-safe write: refuses if the flag target is a symlink; a symlinked **parent** dir is allowed only when it resolves to a dir owned by the current uid. `O_NOFOLLOW`, atomic temp + rename, `0600`. Silent-fails on any fs error.
+- `read_flag` / `append_flag` / `read_history` — symmetric symlink-safe read, 64-byte + whitelist cap on the flag, append-only history log.
 
-### `src/hooks/caveman-config.js` — shared module
+### `caveman activate` — SessionStart hook (`rust/src/activate.rs`)
 
-Exports:
-- `getDefaultMode()` — resolves default mode in order: `CAVEMAN_DEFAULT_MODE` env var → repo-local config (`<cwd>/.caveman/config.json` or `<cwd>/.caveman.json`, walking up to the filesystem root) → user config (`$XDG_CONFIG_HOME/caveman/config.json` / `~/.config/caveman/config.json` / `%APPDATA%\caveman\config.json`) → `'full'`. The env var short-circuits before any cwd walk. Repo-local config lets a team check in a per-project default without polluting every contributor's env or user config.
-- `findRepoConfigPath(start)` — walks up from `start` (default `process.cwd()`) looking for the first `.caveman/config.json` or `.caveman.json`. Bounded to 64 ancestors. Refuses symlinked files (symmetric with `safeWriteFlag` / `readFlag`).
-- `safeWriteFlag(flagPath, content)` — symlink-safe flag write. Refuses if flag target or its immediate parent is a symlink. Opens with `O_NOFOLLOW` where supported. Atomic temp + rename. Creates with `0600`. Protects against local attackers replacing the predictable flag path with a symlink to clobber files writable by the user. Used by both write hooks. Silent-fails on all filesystem errors.
-
-### `src/hooks/caveman-activate.js` — SessionStart hook
-
-Runs once per Claude Code session start. Three things:
-1. Writes the active mode to `$CLAUDE_CONFIG_DIR/.caveman-active` via `safeWriteFlag` (creates if missing)
-2. Emits caveman ruleset as hidden stdout — Claude Code injects SessionStart hook stdout as system context, invisible to user
-3. Checks `settings.json` for statusline config; if missing, appends nudge to offer setup on first interaction
+1. Writes the active mode to the flag file via `safe_write_flag` (or deletes it for `off`).
+2. Emits the caveman ruleset on stdout — Claude Code injects SessionStart stdout as hidden system context. The ruleset is read from `skills/caveman/SKILL.md` relative to the binary (plugin layout: `<plugin_root>/skills/caveman/SKILL.md`) and filtered to the active level; if SKILL.md isn't found (standalone install), an embedded fallback ruleset is used.
+3. If `settings.json` has no statusline, appends a setup nudge.
 
 Silent-fails on all filesystem errors — never blocks session start.
 
-### `src/hooks/caveman-mode-tracker.js` — UserPromptSubmit hook
+### `caveman mode-tracker` — UserPromptSubmit hook (`rust/src/mode_tracker.rs`)
 
-Reads JSON from stdin. Three responsibilities:
+Reads JSON from stdin. Four responsibilities:
 
-**1. Slash-command activation.** If prompt starts with `/caveman`, writes mode to flag file via `safeWriteFlag`:
-- `/caveman` → configured default (see `caveman-config.js`, defaults to `full`)
-- `/caveman lite` → `lite`
-- `/caveman ultra` → `ultra`
-- `/caveman wenyan` or `/caveman wenyan-full` → `wenyan` (alias) / `wenyan-full`
-- `/caveman wenyan-lite` → `wenyan-lite`
-- `/caveman wenyan-ultra` → `wenyan-ultra`
-- `/caveman-commit` → `commit`
-- `/caveman-review` → `review`
-- `/caveman-compress` → `compress`
+**1. Slash-command activation.** `/caveman`, `/caveman lite|ultra|wenyan|wenyan-lite|wenyan-full|wenyan-ultra`, `/caveman off|stop|disable`, `/caveman-commit`, `/caveman-review`, `/caveman-compress` (and the `caveman:`-prefixed plugin forms).
 
-**2. Natural-language activation/deactivation.** Matches phrases like "activate caveman", "turn on caveman mode", "talk like caveman" and writes the configured default mode. Matches "stop caveman", "disable caveman", "normal mode", "deactivate caveman" etc. and deletes the flag file. README promises these triggers, the hook enforces them.
+**2. Natural-language activation/deactivation.** "activate/turn on/talk like caveman", "less/fewer tokens", "be brief/terse" → default mode; "stop/disable/deactivate caveman", "normal mode" → delete flag.
 
-**3. Per-turn reinforcement.** When flag is set to a non-independent mode (i.e. not `commit`/`review`/`compress`), emits a small `hookSpecificOutput` JSON reminder so the model keeps caveman style after other plugins inject competing instructions mid-conversation. The full ruleset still comes from SessionStart — this is just an attention anchor.
+**3. `/caveman-stats`.** Runs the stats logic **in-process** (calls `stats::run_capture`, no subprocess) and returns the output as a `decision: "block"` reason.
 
-### `src/hooks/caveman-statusline.sh` — Statusline badge
+**4. Per-turn reinforcement.** When the flag is a non-independent mode, emits a `hookSpecificOutput` JSON reminder so the model keeps caveman style after other plugins inject competing instructions mid-conversation.
 
-Reads flag file at `$CLAUDE_CONFIG_DIR/.caveman-active`. Outputs colored badge string for Claude Code statusline:
-- `full` or empty → `[CAVEMAN]` (orange)
-- anything else → `[CAVEMAN:<MODE_UPPERCASED>]` (orange)
+### `caveman statusline` — badge (`rust/src/statusline.rs`)
 
-Then appends the lifetime-savings suffix (`⛏ 12.4k`) read from `$CLAUDE_CONFIG_DIR/.caveman-statusline-suffix` — written by `caveman-stats.js` on every `/caveman-stats` run. **Default on**; users opt out with `CAVEMAN_STATUSLINE_SAVINGS=0`. The suffix file is absent until `/caveman-stats` runs at least once, so fresh installs render no fake number.
+Reads the flag file. `full`/empty → `[CAVEMAN]` (orange); else `[CAVEMAN:<MODE>]`. Appends the lifetime-savings suffix (`⛏ 12.4k`) from `$CLAUDE_CONFIG_DIR/.caveman-statusline-suffix`, written by `caveman stats` on every run. **Default on**; opt out with `CAVEMAN_STATUSLINE_SAVINGS=0`. Suffix file absent until stats runs once. Symlink-refuses + strips control bytes — never echoes arbitrary bytes.
 
-Configured in `settings.json` under `statusLine.command`. PowerShell counterpart at `src/hooks/caveman-statusline.ps1` for Windows. Both scripts symlink-refuse and whitelist-validate the flag/suffix file contents — never echo arbitrary bytes.
+### Install / uninstall (`rust/src/install.rs`, `rust/src/settings.rs`)
 
-### Hook installation
+**Self-contained binary.** `skills/` and `agents/` are baked into the binary at build time via `include_dir!` (see `SKILLS_DIR` / `AGENTS_DIR` in `rust/src/install.rs`). So the compiled `caveman` is fully portable — copy it anywhere and `caveman install` works with no repo present.
 
-**Plugin install** — hooks wired automatically by plugin system.
+**Standalone** — `bash install.sh` (or `pwsh install.ps1`) runs `cargo build --release` then `caveman install`, which: (1) copies the binary to `$CLAUDE_CONFIG_DIR/hooks/caveman`; (2) merges the SessionStart + UserPromptSubmit hooks and the statusline into `settings.json`; (3) **registers the slash commands** by extracting the embedded `skills/*` into `$CLAUDE_CONFIG_DIR/skills/` and `agents/*` into `$CLAUDE_CONFIG_DIR/agents/`. Step 3 is what makes Claude Code recognize `/caveman`, `/caveman-commit`, etc. (the prompt hook fires on the raw `/caveman …` text regardless, but without a registered skill Claude Code prints "Unknown command"). It also lands `SKILL.md` exactly where `caveman activate` looks, so installs emit the real filtered ruleset. `settings.rs` is JSONC-tolerant (strips comments + trailing commas on read), backs up to `settings.json.bak`, and is idempotent. Hook commands embed the binary path and contain the substring `caveman` for detection.
 
-**Standalone install** — `bin/install.js` (the unified Node installer) copies hook files into `$CLAUDE_CONFIG_DIR/hooks/` and merges SessionStart + UserPromptSubmit + statusline into `settings.json`. Uses the JSONC-tolerant helpers in `bin/lib/settings.js` so a commented `settings.json` no longer crashes the merge. Defensive `validateHookFields` runs before every write to prevent a single malformed hook from poisoning the entire file (Claude Code Zod silently discards the whole `settings.json` on schema mismatch).
+> **Rebuild after editing any `skills/**` or `agents/*` file** — they're embedded at compile time, so `cargo build --release` must re-run for changes to ship in the binary. `activate` also uses the embedded `caveman/SKILL.md` (`install::embedded_caveman_skill()`) as its fallback ruleset.
 
-The `install.sh` / `install.ps1` shims at the repo root delegate to `bin/install.js` via `node` (local clone) or `npx -y github:JuliusBrussee/caveman` (curl|bash). No legacy fallback path remains — earlier `install.sh.legacy` / `install.ps1.legacy` files were removed.
+**Plugin** — `.claude-plugin/plugin.json` wires the SessionStart/UserPromptSubmit hooks to a small `sh -c` wrapper that builds the Rust binary on first use (`cargo build --release`, Rust required) then `exec`s it. Still no Node.
 
-**Uninstall** — `npx -y github:JuliusBrussee/caveman -- --uninstall` (or `node bin/install.js --uninstall` from a clone). Strips caveman hook entries from `settings.json` via substring marker `caveman`, deletes hook files, and removes the Claude plugin / Gemini extension. Skill installs done via `npx skills add` must be removed via the IDE's skill manager (we don't track them).
+**Uninstall** — `bash install.sh --uninstall` (or `caveman uninstall`). Strips caveman hook entries + statusline from `settings.json` (substring `caveman`), removes the registered skills (`skills/caveman*`, `skills/cavecrew`) and cavecrew agents, the installed binary, and the flag file. `npx skills add` installs for other agents are removed via their own tooling.
 
 ---
 
@@ -240,26 +232,20 @@ How caveman reaches each agent type:
 
 | Agent | Mechanism | Auto-activates? |
 |-------|-----------|----------------|
-| Claude Code | Plugin (hooks + skills) or standalone hooks | Yes — SessionStart hook injects rules |
-| Codex | Plugin in `plugins/caveman/` plus repo `.codex/hooks.json` and `.codex/config.toml` | Yes on macOS/Linux — SessionStart hook |
+| Claude Code | Native Rust binary (`caveman`) wired as SessionStart + UserPromptSubmit hooks + statusline, via `bash install.sh` or the plugin | Yes — SessionStart hook injects rules |
+| Codex | Plugin in `plugins/caveman/` plus repo `.codex/hooks.json` (inline `echo` ruleset, no Node) and `.codex/config.toml` | Yes on macOS/Linux — SessionStart hook |
 | Gemini CLI | Extension with `GEMINI.md` context file | Yes — context file loads every session |
-| opencode | Native plugin (`src/plugins/opencode/`) copied into `~/.config/opencode/plugins/caveman/` + `AGENTS.md` ruleset + skills/agents/commands directories. Plugin uses `session.created` and `tui.prompt.append` lifecycle hooks. No statusline (opencode TUI exposes no plugin-writable badge). | Yes — `session.created` writes flag, `AGENTS.md` carries always-on ruleset |
-| OpenClaw | Workspace skill at `~/.openclaw/workspace/skills/caveman/SKILL.md` (frontmatter merged with `version` + `always: true`) plus a marker-fenced bootstrap block in `~/.openclaw/workspace/SOUL.md`. Both writes go through `bin/lib/openclaw.js`; workspace path is overridable via `OPENCLAW_WORKSPACE`. | Yes — SOUL.md is auto-injected each turn under "Project Context" (subject to OpenClaw's 12K-per-file / 60K-total bootstrap caps) |
-| Cursor | `npx skills add ... -a cursor` (default via `--only cursor`) writes the upstream skill profile; per-repo `.cursor/rules/caveman.mdc` via `--with-init` (calls `src/tools/caveman-init.js`) | Yes — always-on rule |
-| Windsurf | `npx skills add ... -a windsurf` (default via `--only windsurf`); per-repo `.windsurf/rules/caveman.md` via `--with-init` | Yes — always-on rule |
-| Cline | `npx skills add ... -a cline` (default via `--only cline`); per-repo `.clinerules/caveman.md` via `--with-init` | Yes — Cline auto-discovers `.clinerules/` |
-| Copilot | `npx skills add ... -a github-copilot` (soft probe — pass `--only copilot`); per-repo `.github/copilot-instructions.md` + `AGENTS.md` via `--with-init` | Yes — repo-wide instructions |
+| Cursor | `npx skills add ... -a cursor` writes the upstream skill profile; per-repo `.cursor/rules/caveman.mdc` via `caveman init --only cursor` | Yes — always-on rule |
+| Windsurf | `npx skills add ... -a windsurf`; per-repo `.windsurf/rules/caveman.md` via `caveman init --only windsurf` | Yes — always-on rule |
+| Cline | `npx skills add ... -a cline`; per-repo `.clinerules/caveman.md` via `caveman init --only cline` | Yes — Cline auto-discovers `.clinerules/` |
+| Copilot | `npx skills add ... -a github-copilot`; per-repo `.github/copilot-instructions.md` via `caveman init --only copilot` | Yes — repo-wide instructions |
 | Others (Junie, Trae, Warp, Tabnine, Mistral, Qwen, Devin, Droid, ForgeCode, Bob, Crush, iFlow, OpenHands, Qoder, Rovo Dev, Replit, Antigravity, …) | `npx skills add JuliusBrussee/caveman -a <profile>` | No — user must say `/caveman` each session |
 
-opencode reaches Tier 1 minus the statusline (opencode's TUI has no plugin-writable badge). Mode flag lives at `~/.config/opencode/.caveman-active` for any external tooling that wants to surface it.
+> **Removed in the Rust port:** the opencode native plugin (`src/plugins/opencode/`) and the OpenClaw install helper (`bin/lib/openclaw.js`) were Node/Bun and have been deleted along with the rest of the Node footprint. `src/rules/caveman-openclaw-bootstrap.md` is retained as the source of truth if OpenClaw support is re-added (as Rust). The repo is now Claude-Code-focused; other agents reach caveman through the external `npx skills` CLI (not our code) and `caveman init`.
 
-For agents without hook systems, the always-on snippet lives in `INSTALL.md`'s "Want it always on?" section — keep current with `src/rules/caveman-activate.md`.
+For agents without hook systems, the always-on rule body lives in `src/rules/caveman-activate.md` — `caveman init` writes it into each per-repo location.
 
-**Adding a new agent.** Edit the `PROVIDERS` array in `bin/install.js` — single source of truth, no more bash/PS1 dual-source drift. Each entry has `id`, `label`, `mech`, `detect` (clause spec like `command:foo||dir:$HOME/x`), optional `profile` (vercel-labs/skills slug), optional `soft: true` (config-dir-only detection).
-
-1. The profile slug must exist in upstream [vercel-labs/skills](https://github.com/vercel-labs/skills). Verify against the README before merging — wrong slugs cause `npx skills add` to fail at runtime, not at install-script load.
-2. Run `node bin/install.js --list` to confirm the new row renders correctly.
-3. Soft probes (config-dir-only) are fine but tag them with `soft: true`. They render with `(soft)` in `--list` so users know detection is best-effort.
+**Adding a new per-repo rule target.** Add an `Agent` entry to the `agents()` list in `rust/src/init.rs` (`id`, `file`, `frontmatter`, `Mode::Replace`/`Append`). The shared rule body comes from `RULE_BODY_RAW` (embedded from `src/rules/caveman-activate.md`). For agents that install through the upstream skills CLI, just add a row to `INSTALL.md` with the correct vercel-labs/skills profile slug.
 
 ---
 
@@ -292,15 +278,15 @@ To reproduce: `uv run python benchmarks/run.py` (needs `ANTHROPIC_API_KEY` in `.
 
 - Edit `skills/<name>/SKILL.md` for behavior changes. Never edit synced copies under `plugins/caveman/skills/`.
 - Edit `src/rules/caveman-activate.md` for auto-activation rule changes. Never edit any per-agent rule copy a user has on their machine.
-- Edit `src/rules/caveman-openclaw-bootstrap.md` for the OpenClaw SOUL.md bootstrap snippet. Keep the `<!-- caveman-begin -->` / `<!-- caveman-end -->` markers and the `Respond terse like smart caveman` sentinel — `bin/lib/openclaw.js` keys idempotency off both. If you change the embedded fallback in `bin/lib/openclaw.js`, keep it byte-equivalent to the file.
+- The whole Claude Code runtime is the Rust binary in `rust/`. Edit `rust/src/*.rs` for hook/installer behavior, then rebuild (`cargo build --release`) and run `cargo test`. There is **no Node** in the Claude Code path — do not re-introduce `.js` hooks.
+- Edit `src/rules/caveman-activate.md` for the always-on rule body; it's embedded into the binary via `include_str!` in `rust/src/init.rs`, so rebuild to propagate.
 - Per-skill human docs live in `skills/<name>/README.md`. The LLM-facing body is in `SKILL.md`. Don't merge them — different audiences.
-- Build artifacts go in `dist/`. Never check files into `dist/` manually — CI rebuilds them on push, and `dist/` is gitignored.
+- Build artifacts go in `dist/` (CI) and `rust/target/` (cargo) — both gitignored. `rust/Cargo.lock` IS committed (binary crate).
 - README most important file for user-facing impact. Optimize for non-technical readers. Preserve caveman voice.
 - `INSTALL.md` is the per-agent install reference. Keep the install table in `README.md` short and link out to `INSTALL.md` for the full matrix.
 - Benchmark and eval numbers must be real. Never fabricate or estimate.
 - CI workflow commits back to main after merge. Account for when checking branch state.
-- Hook files must silent-fail on all filesystem errors. Never let hook crash block session start.
-- Any new flag file write must go through `safeWriteFlag()` in `caveman-config.js`. Direct `fs.writeFileSync` on predictable user-owned paths reopens the symlink-clobber attack surface.
-- Hooks must respect `CLAUDE_CONFIG_DIR` env var, not hardcode `~/.claude`. Same for `bin/install.js` / statusline scripts.
-- `bin/install.js` is the only installer source. `install.sh` / `install.ps1` at repo root are 30-line shims that delegate to it. Never re-add per-OS install logic to the shims — that's how we got the Windows quoting bug (#249).
-- Any settings.json read in installer or hooks must go through `bin/lib/settings.js` `readSettings()` so JSONC comments don't crash the merge. Any settings.json write must run through `validateHookFields()` first.
+- Hook subcommands must silent-fail on all filesystem errors. Never let a hook crash block session start.
+- Any new flag-file write must go through `safe_write_flag()` in `rust/src/config.rs`. A plain `fs::write` on a predictable user-owned path reopens the symlink-clobber attack surface.
+- All subcommands must respect `CLAUDE_CONFIG_DIR`, not hardcode `~/.claude` (use `config::claude_dir()`).
+- `install.sh` / `install.ps1` only build with cargo and call `caveman install`. Keep settings.json edits in `rust/src/settings.rs` (JSONC-tolerant read, backup before write) — never shell out to another runtime to edit JSON.

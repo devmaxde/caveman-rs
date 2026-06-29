@@ -46,12 +46,12 @@ Q: "where symlink-safe flag write?"
 
 ```
 Defs:
-- hooks/caveman-config.js:81 — `safeWriteFlag` — atomic write w/ O_NOFOLLOW
-- hooks/caveman-config.js:160 — `readFlag` — paired reader
+- rust/src/config.rs — `safe_write_flag` — atomic write w/ O_NOFOLLOW
+- rust/src/config.rs — `read_flag` — paired reader
 Callers:
-- hooks/caveman-mode-tracker.js:33,87
-- hooks/caveman-activate.js:40
+- rust/src/mode_tracker.rs
+- rust/src/activate.rs
 Tests:
-- tests/test_symlink_flag.js — 12 cases
-2 defs, 3 callers, 1 test file.
+- rust/src/settings.rs (#[cfg(test)]) — JSONC + hook merge cases
+2 defs, 2 callers, 1 test module.
 ```

@@ -1,18 +1,15 @@
-# caveman — installer shim (Windows / PowerShell).
+# caveman — node-free installer for Claude Code (Windows / PowerShell).
 #
-# Thin wrapper around bin/install.js (the unified Node installer). Every flag
-# you'd pass to bin/install.js can be passed here; we just forward them.
+# Builds the native Rust `caveman` binary (no Node, ever) and wires the
+# SessionStart + UserPromptSubmit hooks and the statusline badge into
+# settings.json.
 #
-# One-line install:
-#   irm https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.ps1 | iex
+# Usage:
+#   pwsh install.ps1            # build + install
+#   pwsh install.ps1 --force    # rebuild + re-wire over an existing install
+#   pwsh install.ps1 --uninstall
 #
-# Local clone:
-#   pwsh install.ps1 [flags]
-#
-# Why a Node installer? install.sh + install.ps1 used to be parallel sources of
-# truth and constantly drifted (issue #249 was a `node -e "..."` quoting bug
-# that silently dropped the JSON merge step on every Windows install). One
-# Node script works everywhere without quoting bugs.
+# Requires the Rust toolchain (cargo). Install once from https://rustup.rs.
 
 [CmdletBinding()]
 param(
@@ -21,42 +18,57 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Repo = "JuliusBrussee/caveman"
 
-# Require Node ≥18.
-$node = Get-Command node -ErrorAction SilentlyContinue
-if (-not $node) {
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$manifest = Join-Path $here "rust/Cargo.toml"
+
+$force = ""
+$uninstall = $false
+foreach ($arg in $InstallerArgs) {
+  switch ($arg) {
+    "--force"     { $force = "--force" }
+    "-f"          { $force = "--force" }
+    "--uninstall" { $uninstall = $true }
+  }
+}
+
+# Make cargo reachable even if the shell was not reopened since installing rustup.
+$cargo = Get-Command cargo -ErrorAction SilentlyContinue
+if (-not $cargo) {
+  $cargoBin = Join-Path $HOME ".cargo/bin"
+  if (Test-Path $cargoBin) { $env:PATH = "$cargoBin;$env:PATH" }
+  $cargo = Get-Command cargo -ErrorAction SilentlyContinue
+}
+if (-not $cargo) {
   Write-Error @"
-caveman: Node.js (>=18) required. Install:
-  - winget install OpenJS.NodeJS.LTS
-  - or download from https://nodejs.org
+caveman: 'cargo' (Rust toolchain) not found. caveman is now native Rust — no Node required.
+  Install Rust once: https://rustup.rs
+  Then re-run: pwsh install.ps1
 "@
   exit 1
 }
 
-$nodeMajor = [int](& node -p "process.versions.node.split('.')[0]")
-if ($nodeMajor -lt 18) {
-  Write-Error "caveman: Node $nodeMajor too old. Need Node >=18. Upgrade: https://nodejs.org"
+if (-not (Test-Path $manifest)) {
+  Write-Error "caveman: cannot find $manifest — run this script from a caveman checkout."
   exit 1
 }
 
-# If we're inside the repo clone, run the local installer directly.
-$here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$local = Join-Path $here "bin/install.js"
-if (Test-Path $local) {
-  & node $local @InstallerArgs
+Write-Host "Building caveman (release)..."
+& cargo build --release --manifest-path $manifest
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+$bin = Join-Path $here "rust/target/release/caveman.exe"
+if (-not (Test-Path $bin)) { $bin = Join-Path $here "rust/target/release/caveman" }
+if (-not (Test-Path $bin)) {
+  Write-Error "caveman: build did not produce a binary at $bin"
+  exit 1
+}
+
+if ($uninstall) {
+  & $bin uninstall
   exit $LASTEXITCODE
 }
 
-# Curl-pipe path: delegate to npx.
-$npx = Get-Command npx -ErrorAction SilentlyContinue
-if (-not $npx) {
-  Write-Error "caveman: npx required (ships with Node >=18). Reinstall Node.js."
-  exit 1
-}
-
-# Do NOT pass `--` here — npm 7+ npx already forwards trailing args to the
-# package, and a literal `--` was tripping bin/install.js's parseArgs as an
-# unknown flag.
-& npx -y "github:$Repo" @InstallerArgs
+Write-Host ""
+if ($force) { & $bin install $force } else { & $bin install }
 exit $LASTEXITCODE

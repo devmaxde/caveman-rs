@@ -1,54 +1,72 @@
-#!/usr/bin/env bash
-# caveman — installer shim.
+#!/bin/bash
+# caveman — node-free installer for Claude Code.
 #
-# Thin wrapper around bin/install.js (the unified Node installer). Every flag
-# you'd pass to bin/install.js can be passed here; we just forward them.
+# Builds the native Rust `caveman` binary (no Node, ever) and wires the
+# SessionStart + UserPromptSubmit hooks and the statusline badge into
+# settings.json.
 #
-# One-line install:
-#   curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh | bash -s -- --all
+# Usage:
+#   bash install.sh            # build + install
+#   bash install.sh --force    # rebuild + re-wire over an existing install
+#   bash install.sh --uninstall
 #
-# Local clone:
-#   bash install.sh [flags]
-#
-# Why a Node installer? install.sh + install.ps1 used to be parallel sources
-# of truth and constantly drifted (issue #249, etc.). One Node script works
-# everywhere without bash/PowerShell quoting bugs.
-
+# Requires the Rust toolchain (cargo). Install once from https://rustup.rs.
 set -euo pipefail
 
-REPO="JuliusBrussee/caveman"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+MANIFEST="$SCRIPT_DIR/rust/Cargo.toml"
 
-# Require Node ≥18. nvm is a common path; print a hint if missing.
-if ! command -v node >/dev/null 2>&1; then
-  echo "caveman: Node.js (≥18) required. Install:" >&2
-  echo "  macOS:  brew install node" >&2
-  echo "  Linux:  see https://nodejs.org or use nvm (https://github.com/nvm-sh/nvm)" >&2
+FORCE=""
+UNINSTALL=0
+for arg in "$@"; do
+  case "$arg" in
+    --force|-f) FORCE="--force" ;;
+    --uninstall) UNINSTALL=1 ;;
+  esac
+done
+
+# Make cargo reachable even if the user has not reopened their shell since
+# installing rustup.
+if ! command -v cargo >/dev/null 2>&1; then
+  if [ -f "$HOME/.cargo/env" ]; then
+    # shellcheck disable=SC1091
+    . "$HOME/.cargo/env"
+  fi
+fi
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "ERROR: 'cargo' (Rust toolchain) not found."
+  echo "       caveman is now native Rust — no Node required."
+  echo "       Install Rust once: https://rustup.rs"
+  echo "         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+  echo "       Then re-run: bash install.sh"
   exit 1
 fi
 
-NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
-if [ "$NODE_MAJOR" -lt 18 ]; then
-  echo "caveman: Node $NODE_MAJOR too old. Need Node ≥18." >&2
-  echo "  Upgrade: https://nodejs.org" >&2
+if [ ! -f "$MANIFEST" ]; then
+  echo "ERROR: cannot find $MANIFEST — run this script from a caveman checkout."
   exit 1
 fi
 
-# If we're inside the repo clone, run the local installer directly — saves
-# the npx round-trip and keeps offline installs working. BASH_SOURCE is unset
-# when bash is invoked from stdin (curl | bash), and `set -u` would trip on a
-# bare reference — default to empty so the curl-pipe path falls through cleanly.
-here="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd)" || here=""
-if [ -n "$here" ] && [ -f "$here/bin/install.js" ]; then
-  exec node "$here/bin/install.js" "$@"
-fi
+echo "Building caveman (release)..."
+cargo build --release --manifest-path "$MANIFEST"
 
-# Curl-pipe path: delegate to npx. We do NOT pass `--` here — npm 7+ npx
-# already forwards trailing args to the package, and a literal `--` tripped
-# bin/install.js's parseArgs as an unknown flag.
-if ! command -v npx >/dev/null 2>&1; then
-  echo "caveman: npx required (ships with Node ≥18). Reinstall Node.js." >&2
+BIN="$SCRIPT_DIR/rust/target/release/caveman"
+if [ ! -x "$BIN" ]; then
+  echo "ERROR: build did not produce $BIN"
   exit 1
 fi
 
-exec npx -y "github:$REPO" "$@"
+if [ "$UNINSTALL" -eq 1 ]; then
+  "$BIN" uninstall
+  exit 0
+fi
+
+echo ""
+"$BIN" install $FORCE
+
+echo ""
+echo "What's installed (all native, no Node):"
+echo "  - SessionStart hook: auto-loads caveman rules every session"
+echo "  - UserPromptSubmit hook: tracks mode + injects per-turn reinforcement"
+echo "  - Statusline badge: shows [CAVEMAN] / [CAVEMAN:ULTRA] etc."

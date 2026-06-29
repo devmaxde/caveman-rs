@@ -11,8 +11,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hooks/caveman-activate.js\"",
-            "timeout": 5,
+            "command": "sh -c '. \"$HOME/.cargo/env\" 2>/dev/null; B=\"${CLAUDE_PLUGIN_ROOT}/rust/target/release/caveman\"; [ -x \"$B\" ] || cargo build --release --manifest-path \"${CLAUDE_PLUGIN_ROOT}/rust/Cargo.toml\" >&2; exec \"$B\" activate'",
+            "timeout": 120,
             "statusMessage": "Loading caveman mode..."
           }
         ]
@@ -23,8 +23,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hooks/caveman-mode-tracker.js\"",
-            "timeout": 5,
+            "command": "sh -c '. \"$HOME/.cargo/env\" 2>/dev/null; B=\"${CLAUDE_PLUGIN_ROOT}/rust/target/release/caveman\"; [ -x \"$B\" ] || cargo build --release --manifest-path \"${CLAUDE_PLUGIN_ROOT}/rust/Cargo.toml\" >&2; exec \"$B\" mode-tracker'",
+            "timeout": 120,
             "statusMessage": "Tracking caveman mode..."
           }
         ]
