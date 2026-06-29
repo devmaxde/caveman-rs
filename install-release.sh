@@ -16,7 +16,7 @@
 #   CAVEMAN_REPO   override the GitHub repo (default JuliusBrussee/caveman)
 set -euo pipefail
 
-REPO="${CAVEMAN_REPO:-JuliusBrussee/caveman}"
+REPO="${CAVEMAN_REPO:-devmaxde/caveman-rs}"
 
 # First non-flag arg is the version; flags pass through to `caveman install`.
 VERSION="latest"
