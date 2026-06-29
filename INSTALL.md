@@ -37,6 +37,25 @@ What it does:
 
 Prefer the Claude Code plugin? `claude plugin marketplace add JuliusBrussee/caveman && claude plugin install caveman@caveman`. The plugin hooks build the Rust binary on first session (Rust must be installed) — still no Node.
 
+### No Rust? Install from a prebuilt binary
+
+Every release ships a statically-linked Linux x86_64 `caveman` binary. It needs **no Rust, no build, no repo checkout** — the binary bakes in every skill and agent. Install it on any number of machines:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install-release.sh | bash
+```
+
+Or pin a version / re-wire an existing install:
+
+```bash
+bash install-release.sh v0.2.0          # specific release tag
+bash install-release.sh latest --force  # re-wire over an existing install
+```
+
+The script downloads the binary, verifies its SHA-256 checksum, and runs `caveman install` (copies it to `$CLAUDE_CONFIG_DIR/hooks/caveman`, wires the hooks + statusline, registers the slash commands). Uninstall the same as source installs: `caveman uninstall`.
+
+Prefer to grab it by hand? Download `caveman-x86_64-unknown-linux-musl` from the [latest release](https://github.com/JuliusBrussee/caveman/releases/latest), `chmod +x` it, and run `./caveman-x86_64-unknown-linux-musl install`.
+
 ## Other agents
 
 The agents below install through the upstream [`skills`](https://github.com/vercel-labs/skills) CLI (`npx skills add`) or their own native mechanisms. These are external tools — only the Claude Code path above is the native Rust binary.

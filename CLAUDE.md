@@ -198,6 +198,22 @@ Reads the flag file. `full`/empty → `[CAVEMAN]` (orange); else `[CAVEMAN:<MODE
 
 **Uninstall** — `bash install.sh --uninstall` (or `caveman uninstall`). Strips caveman hook entries + statusline from `settings.json` (substring `caveman`), removes the registered skills (`skills/caveman*`, `skills/cavecrew`) and cavecrew agents, the installed binary, and the flag file. `npx skills add` installs for other agents are removed via their own tooling.
 
+**Prebuilt-binary install (no Rust)** — `install-release.sh` downloads the statically-linked release binary, verifies its SHA-256, and runs `caveman install`. Because skills/agents are baked in via `include_dir!`, the downloaded binary is fully self-contained — no repo, no cargo, no rebuild. Keep this script separate from `install.sh`/`install.ps1` (those build from source); it must never shell out to cargo or Node. The binaries it pulls come from the release pipeline below.
+
+---
+
+## Release pipeline
+
+`.github/workflows/release.yml` triggers on `v*` tag pushes (and `workflow_dispatch`).
+
+What it does:
+1. Builds `caveman` for `x86_64-unknown-linux-musl` — statically linked (`RUSTFLAGS=-C target-feature=+crt-static`, musl is static by default), so it runs on any Linux distro with no shared-lib deps.
+2. Runs `cargo test` and asserts the output binary is static (`ldd` → "not a dynamic executable") before publishing.
+3. Packages the raw binary `caveman-x86_64-unknown-linux-musl`, a `caveman-x86_64-unknown-linux-musl.tar.gz`, and a `.sha256` checksum file.
+4. Publishes all three as assets on the GitHub Release for the tag (auto-generated notes).
+
+To cut a release: bump `version` in `rust/Cargo.toml`, commit, then `git tag vX.Y.Z && git push --tags`. Users then install with no toolchain via `install-release.sh` (see above). Adding another arch (i686, aarch64) = add a `target` to the matrix and the `rustup target add` line; `install-release.sh`'s `case "$ARCH"` maps `uname -m` → target name.
+
 ---
 
 ## Skill system

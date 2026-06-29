@@ -1,0 +1,101 @@
+name: Release binaries
+
+# Builds the fully self-contained `caveman` binary and attaches it to a GitHub
+# Release so users can install on any machine WITHOUT Rust or a local rebuild.
+# The binary bakes in every skill + agent (include_dir!), so `caveman install`
+# needs nothing on disk but itself.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build/publish (e.g. v0.2.0). Defaults to the current ref."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Statically linked Linux x86_64 — runs on any glibc/musl distro,
+          # no shared-library deps.
+          - target: x86_64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add ${{ matrix.target }}
+
+      - name: Install musl build tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: cargo test
+        working-directory: rust
+        run: cargo test
+
+      - name: Build static release binary
+        working-directory: rust
+        env:
+          # musl targets link static by default; make crt-static explicit so the
+          # output never picks up a dynamic loader.
+          RUSTFLAGS: "-C target-feature=+crt-static"
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Verify the binary is statically linked
+        working-directory: rust
+        run: |
+          BIN="target/${{ matrix.target }}/release/caveman"
+          file "$BIN"
+          if ldd "$BIN" 2>&1 | grep -qiE "not a dynamic executable|statically linked"; then
+            echo "OK: statically linked"
+          else
+            echo "ERROR: binary is dynamically linked:"
+            ldd "$BIN" || true
+            exit 1
+          fi
+          # Smoke-test it actually runs.
+          "$BIN" --version
+
+      - name: Package artifacts
+        id: package
+        working-directory: rust
+        run: |
+          BIN="target/${{ matrix.target }}/release/caveman"
+          OUT="$GITHUB_WORKSPACE/dist-release"
+          mkdir -p "$OUT"
+
+          # Raw binary for a direct `curl -L .../caveman-<target>`.
+          RAW="caveman-${{ matrix.target }}"
+          cp "$BIN" "$OUT/$RAW"
+
+          # tar.gz with the binary named plainly `caveman`.
+          TARBALL="caveman-${{ matrix.target }}.tar.gz"
+          tar -C "target/${{ matrix.target }}/release" -czf "$OUT/$TARBALL" caveman
+
+          # Checksums for verification by the installer.
+          ( cd "$OUT" && sha256sum "$RAW" "$TARBALL" > "caveman-${{ matrix.target }}.sha256" )
+
+          ls -l "$OUT"
+          echo "out=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: ${{ github.event.inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist-release/caveman-${{ matrix.target }}
+            dist-release/caveman-${{ matrix.target }}.tar.gz
+            dist-release/caveman-${{ matrix.target }}.sha256
